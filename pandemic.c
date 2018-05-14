@@ -8,7 +8,7 @@
 #include <stdlib.h> /* malloc, free, and various others */
 #include <time.h> /* time is used to seed the random number generator */
 #include <unistd.h> /* random, getopt, some others */
-#include <mpi.h> /* MPI_Allgather, MPI_Init, MPI_Comm_rank, MPI_Comm_size */
+#include <mpi.h> /* MPI_Allgather, MPI_Init, MPI_Comm_rank, etc. */
 
 /* States of people -- all people are one of these 4 states */
 /* These are const char because they are displayed as ASCII */
@@ -65,6 +65,8 @@ int main(int argc, char** argv)
   /* Integer arrays, a.k.a. integer pointers */
   int *xs;
   int *ys;
+  int *infected_xs;
+  int *infected_ys;
   int *days_infected;
 
   /* Character arrays, a.k.a. character pointers */
@@ -99,8 +101,6 @@ int main(int argc, char** argv)
   double my_recovery_attempts = 0.0;
   int *my_xs;
   int *my_ys;
-  int *my_infected_xs;
-  int *my_infected_ys;
   int *their_infected_xs;
   int *their_infected_ys;
   char *my_states;
@@ -180,31 +180,27 @@ int main(int argc, char** argv)
 
   /* Each process determines the number of initially infected people 
    *  for which it is responsible */
-  my_num_init_infected = num_init_infected 
-    / num_procs;
+  my_num_init_infected = num_init_infected / num_procs;
 
   /* The last process is responsible for the remainder */
   if(my_rank == num_procs - 1)
   {
-    my_num_init_infected += num_init_infected 
-      % num_procs;
+    my_num_init_infected += num_init_infected % num_procs;
   }
 
   /* Allocate the arrays */
   xs = (int*)malloc(num_people * sizeof(int));
   ys = (int*)malloc(num_people * sizeof(int));
-  my_xs = (int*)malloc(my_num_people * sizeof(int));
-  my_ys = (int*)malloc(my_num_people * sizeof(int));
-  my_infected_xs = (int*)malloc(my_num_people * sizeof(int));
-  my_infected_ys = (int*)malloc(my_num_people * sizeof(int));
-  their_infected_xs = (int*)malloc(num_people 
-      * sizeof(int));
-  their_infected_ys = (int*)malloc(num_people 
-      * sizeof(int));
+  infected_xs = (int*)malloc(my_num_people * sizeof(int));
+  infected_ys = (int*)malloc(my_num_people * sizeof(int));
   days_infected = (int*)malloc(my_num_people * sizeof(int));
+  states = (char*)malloc(num_people * sizeof(char));
   recvcounts = (int*)malloc(num_procs * sizeof(int));
   displs = (int*)malloc(num_procs * sizeof(int));
-  states = (char*)malloc(num_people * sizeof(char));
+  my_xs = (int*)malloc(my_num_people * sizeof(int));
+  my_ys = (int*)malloc(my_num_people * sizeof(int));
+  their_infected_xs = (int*)malloc(num_people * sizeof(int));
+  their_infected_ys = (int*)malloc(num_people * sizeof(int));
   my_states = (char*)malloc(my_num_people * sizeof(char));
   environment = (char**)malloc(env_height * env_width * sizeof(char*));
   for(y = 0; y < env_width; y++)
@@ -254,8 +250,8 @@ int main(int argc, char** argv)
     {
       if(my_states[person1] == INFECTED)
       {
-        my_infected_xs[current_infected_person] = my_xs[person1];
-        my_infected_ys[current_infected_person] = my_ys[person1];
+        infected_xs[current_infected_person] = my_xs[person1];
+        infected_ys[current_infected_person] = my_ys[person1];
         current_infected_person++;
       }
     }
@@ -282,14 +278,14 @@ int main(int argc, char** argv)
     /* Each process sends the x locations of its infected people 
      *  to all the other processes and receives the x locations of their 
      *  infected people */
-    MPI_Allgatherv(my_infected_xs, my_num_infected, MPI_INT, 
+    MPI_Allgatherv(infected_xs, my_num_infected, MPI_INT, 
         their_infected_xs, recvcounts, displs, 
         MPI_INT, MPI_COMM_WORLD);
 
     /* Each process sends the y locations of its infected people 
      *  to all the other processes and receives the y locations of their 
      *  infected people */
-    MPI_Allgatherv(my_infected_ys, my_num_infected, MPI_INT, 
+    MPI_Allgatherv(infected_ys, my_num_infected, MPI_INT, 
         their_infected_ys, recvcounts, displs, 
         MPI_INT, MPI_COMM_WORLD);
 
@@ -376,7 +372,7 @@ int main(int argc, char** argv)
     }
 
     new_num_infected = num_infected;
-    /* For each of the process’s people, do the following */
+    /* For each of the process' people, do the following */
     for(person1 = 0; person1 < my_num_people; person1++)
     {
       /* If the person is susceptible, then */
@@ -414,13 +410,13 @@ int main(int argc, char** argv)
           my_states[person1] = INFECTED;
 
           /* Update the counters */
-          my_num_infected++;
+          new_num_infected++;
           my_num_susceptible--;
           my_num_infections++;
         }
       }
     }
-    num_infected = new_num_infected;
+    my_num_infected = new_num_infected;
 
     /* For each person, do the following */
     for(i = 0; i < my_num_people; i++)
@@ -468,13 +464,34 @@ int main(int argc, char** argv)
     }
   }
 
-  printf("Rank %d final counts: %d susceptible, %d infected, %d immune, \
-      %d dead\nRank %d actual contagiousness: %f\nRank %d actual deadliness: \
-      %f\n", my_rank, my_num_susceptible, my_num_infected, my_num_immune, 
-      my_num_dead, my_rank, 100.0 * (my_num_infections / 
-        (my_infection_attempts == 0 ? 1 : my_infection_attempts)),
-      my_rank, 100.0 * (my_num_deaths / (my_recovery_attempts == 0 ? 1 
-          : my_recovery_attempts)));
+  /* Rank 0 gathers the counts from all the ranks */
+  MPI_Reduce(&my_num_susceptible, &num_susceptible, 1,
+             MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+  MPI_Reduce(&my_num_infected, &num_infected, 1,
+             MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+  MPI_Reduce(&my_num_immune, &num_immune, 1,
+             MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+  MPI_Reduce(&my_num_dead, &num_dead, 1,
+             MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+  MPI_Reduce(&my_num_infections, &num_infections, 1,
+             MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+  MPI_Reduce(&my_infection_attempts, &infection_attempts, 1,
+             MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+  MPI_Reduce(&my_num_deaths, &num_deaths, 1,
+             MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+  MPI_Reduce(&my_recovery_attempts, &recovery_attempts, 1,
+             MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+  if (my_rank == 0)
+  {
+    printf("Final counts: %d susceptible, %d infected, %d immune, \
+        %d dead\nActual contagiousness: %f\nActual deadliness: \
+        %f\n", num_susceptible, num_infected, num_immune, 
+        num_dead, 100.0 * (num_infections / 
+          (infection_attempts == 0 ? 1 : infection_attempts)),
+        100.0 * (num_deaths / (recovery_attempts == 0 ? 1 
+            : recovery_attempts)));
+  }
 
   /* Deallocate the arrays -- we have finished using the memory, so now we
    *  "free" it back to the heap */
@@ -482,18 +499,18 @@ int main(int argc, char** argv)
   {
     free(environment[y]);
   }
-  free(environment);
   free(my_states);
-  free(states);
-  free(displs);
-  free(recvcounts);
-  free(days_infected);
   free(their_infected_ys);
   free(their_infected_xs);
-  free(my_infected_ys);
-  free(my_infected_xs);
   free(my_ys);
   free(my_xs);
+  free(displs);
+  free(recvcounts);
+  free(environment);
+  free(states);
+  free(days_infected);
+  free(infected_ys);
+  free(infected_xs);
   free(ys);
   free(xs);
 
