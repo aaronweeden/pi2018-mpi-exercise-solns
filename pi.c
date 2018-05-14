@@ -4,6 +4,7 @@
 
 #include <float.h>   /* DBL_EPSILON, DBL_DIG */
 #include <unistd.h>  /* getopt(), optarg */
+#include <omp.h>     /* omp_get_wtime() */
 #include <math.h>    /* sqrt() */
 #include <mpi.h>     /* MPI_Init(), etc. */
 #include <stdbool.h> /* bool type */
@@ -31,6 +32,9 @@ char const GETOPT_STRING[] = {
 };
 
 int main(int argc, char **argv) {
+  /* Start the timer */
+  double startTime = omp_get_wtime();
+
   bool isError = false;
 
   /* Start MPI */
@@ -110,6 +114,10 @@ int main(int argc, char **argv) {
     /* Calculate pi and print it */
     printf("%.*f\n", DBL_DIG, 4.0 * areaSum);
     printf("Value of pi from math.h is %.*f\n", DBL_DIG, M_PI);
+
+    /* Stop the timer, print the total elapsed time */
+    printf("Runtime: %f seconds\n",
+      omp_get_wtime() - startTime);
   }
 
   /* Stop MPI */
