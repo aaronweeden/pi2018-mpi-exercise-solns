@@ -6,4 +6,4 @@
 
 cd $PBS_O_WORKDIR
 
-aprun -n 1 ./pi.exe -r 10000
+aprun -n 64 -N 32 ./pi.exe -r 10000
