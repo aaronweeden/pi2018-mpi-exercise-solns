@@ -26,7 +26,6 @@ int main(int argc, char** argv)
   int new_num_infected = 0;
   int num_people = 50;
   int person1 = 0;
-  int current_infected_person = 0;
   int num_init_infected = 1;
   int x = 0;
   int y = 0;
@@ -195,6 +194,11 @@ int main(int argc, char** argv)
   infected_ys = (int*)malloc(my_num_people * sizeof(int));
   days_infected = (int*)malloc(my_num_people * sizeof(int));
   states = (char*)malloc(num_people * sizeof(char));
+  environment = (char**)malloc(env_height * env_width * sizeof(char*));
+  for(y = 0; y < env_width; y++)
+  {
+    environment[y] = (char*)malloc(env_width * sizeof(char));
+  }
   recvcounts = (int*)malloc(num_procs * sizeof(int));
   displs = (int*)malloc(num_procs * sizeof(int));
   my_xs = (int*)malloc(my_num_people * sizeof(int));
@@ -202,11 +206,6 @@ int main(int argc, char** argv)
   their_infected_xs = (int*)malloc(num_people * sizeof(int));
   their_infected_ys = (int*)malloc(num_people * sizeof(int));
   my_states = (char*)malloc(my_num_people * sizeof(char));
-  environment = (char**)malloc(env_height * env_width * sizeof(char*));
-  for(y = 0; y < env_width; y++)
-  {
-    environment[y] = (char*)malloc(env_width * sizeof(char));
-  }
 
   /* Seed the random number generator based on the current time */
   srandom(time(NULL) + my_rank * 12345);
@@ -245,14 +244,14 @@ int main(int argc, char** argv)
   for(current_day = 0; current_day < num_days; current_day++)
   {
     /* Determine infected x locations and infected y locations */
-    current_infected_person = 0;
+    i = 0;
     for(person1 = 0; person1 < my_num_people; person1++)
     {
       if(my_states[person1] == INFECTED)
       {
-        infected_xs[current_infected_person] = my_xs[person1];
-        infected_ys[current_infected_person] = my_ys[person1];
-        current_infected_person++;
+        infected_xs[i] = my_xs[person1];
+        infected_ys[i] = my_ys[person1];
+        i++;
       }
     }
     /* Each process sends its count of infected people to all the
@@ -261,16 +260,15 @@ int main(int argc, char** argv)
         MPI_INT, MPI_COMM_WORLD);
 
     num_infected = 0;
-    for(current_rank = 0; current_rank <= num_procs - 1;
-        current_rank++)
+    for(current_rank = 0; current_rank < num_procs; current_rank++)
     {
       num_infected += recvcounts[current_rank];
     }
+
     /* Set up the displacements in the receive buffer (see the man page for 
      *  MPI_Allgatherv) */
     current_displ = 0;
-    for(current_rank = 0; current_rank <= num_procs - 1;
-        current_rank++)
+    for(current_rank = 0; current_rank < num_procs; current_rank++)
     {
       displs[current_rank] = current_displ;
       current_displ += recvcounts[current_rank];
@@ -295,20 +293,16 @@ int main(int argc, char** argv)
     /* Set up the receive counts and displacements in the receive buffer 
      *  (see the man page for MPI_Gatherv) */
     current_displ = 0;
-    for(current_rank = 0; current_rank <= num_procs - 1;
-        current_rank++)
+    for(current_rank = 0; current_rank < num_procs; current_rank++)
     {
       displs[current_rank] = current_displ;
-      recvcounts[current_rank] = num_people
-        / num_procs;
+      recvcounts[current_rank] = num_people / num_procs;
       if(current_rank == num_procs - 1)
       {
-        recvcounts[current_rank] += num_people
-          % num_procs;
+        recvcounts[current_rank] += num_people % num_procs;
       }
       current_displ += recvcounts[current_rank];
     }
-
     MPI_Gatherv(my_states, my_num_people, MPI_CHAR, states,
         recvcounts, displs, MPI_CHAR, 0, MPI_COMM_WORLD);
     MPI_Gatherv(my_xs, my_num_people, MPI_INT, xs,
@@ -371,7 +365,7 @@ int main(int argc, char** argv)
       }
     }
 
-    new_num_infected = num_infected;
+    new_num_infected = my_num_infected;
     /* For each of the process' people, do the following */
     for(person1 = 0; person1 < my_num_people; person1++)
     {
@@ -402,9 +396,9 @@ int main(int argc, char** argv)
         }
 
         /* If there is at least one infected person nearby, and a random number
-         *  less than 100 is less than or equal to the contagiousness factor,
+         *  less than 100 is less than the contagiousness factor,
          *  then */
-        if(infected_nearby >= 1 && (random() % 100) <= contagiousness_factor)
+        if(infected_nearby >= 1 && (random() % 100) < contagiousness_factor)
         {
           /* Change person1's state to infected */
           my_states[person1] = INFECTED;
